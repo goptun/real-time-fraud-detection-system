@@ -105,3 +105,27 @@ fazer o passo acima. **Mudou o conjunto de features? Retreine** (o scorer recusa
   sobe em alguns minutos. Volte para vazio/`1.0` depois.
 - **Disco/retenção:** Kafka retém 1 h (segmentos de 10 min); o banco mantém 48 h e no máximo 200 mil linhas (varredura a cada 5 min).
 - **Logs:** `sudo docker logs -f fraud_scorer` (contadores a cada 30 s), `fraud_producer`, `fraud_api`.
+
+## 8. Observação pós-deploy (tarefa 9.7)
+
+**Deploy realizado em 2026-09-20.** Nginx: config anterior salva em `~/nginx-backup/matheusramos.dev.20260920-172634` na VPS
+(rollback: `sudo cp -p` de volta para `/etc/nginx/sites-available/matheusramos.dev`, `sudo nginx -t`, `sudo systemctl reload nginx`).
+
+Linha de base ~30 min após o deploy: 79 mil linhas (46 MB de banco) · Kafka 33 MB **reais** em disco · memória do stack ~720 MiB, 9,0 GiB disponíveis
+na VPS · 0 reinícios / 0 OOM · latência ao vivo p50 22 ms / p95 23 ms · drift `ok` (maior PSI 0,059).
+
+> Atenção ao medir o Kafka: `docker system df -v` mostra ~1,2 GB para `fraud-detection_kafka_data`, mas é o **tamanho aparente**
+> dos índices esparsos pré-alocados (10 KB × 3 arquivos × 50 partições do `__consumer_offsets`). Use o uso real:
+> `sudo du -sh /var/lib/docker/volumes/fraud-detection_kafka_data/_data` (33 MB).
+
+Para conferir a estabilidade e a retenção depois de algumas horas/dias (o teto de 200 mil linhas é atingido em ~14 h; a janela de 48 h, em 2 dias):
+
+```bash
+sudo docker exec fraud_postgres psql -U fraud -d fraud -tAc \
+  "select count(*), min(scored_at), pg_size_pretty(pg_database_size(current_database())) from transactions"   # <= ~200 mil linhas, min(scored_at) <= 48 h
+sudo du -sh /var/lib/docker/volumes/fraud-detection_kafka_data/_data                                          # deve ficar em dezenas de MB
+sudo docker inspect -f '{{.Name}} restarts={{.RestartCount}} oom={{.State.OOMKilled}}' $(sudo docker ps -q --filter name=fraud_)
+sudo docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' | grep fraud_ ; free -h | sed -n 2p ; df -h / | tail -1
+curl -s http://127.0.0.1:8002/drift | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["status"], d["alerts"])'
+```
+

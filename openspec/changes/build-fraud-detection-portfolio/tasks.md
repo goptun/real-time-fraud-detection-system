@@ -71,10 +71,10 @@
 
 - [x] 9.1 **Gate de recursos:** na VPS, medir `free -h`, disco, CPU e `docker stats` dos stacks existentes (somente leitura) e confirmar que o orçamento deste stack cabe com margem; se não couber, aplicar o fallback do design (Redpanda ou heap/partições menores) e atualizar o compose antes de seguir. Registrar os números no `docs/DEPLOY.md`
 - [x] 9.2 Publicar o repositório no GitHub (conta `goptun`, como o RAG), sem segredos versionados; verificar varredura de segredos no histórico e `.env` no gitignore
-- [ ] 9.3 Na VPS: `git clone`, criar `.env`, `docker compose -f docker/docker-compose.yml --env-file .env up -d --build` (sem `--remove-orphans`); verificar `curl http://127.0.0.1:8002/health` saudável e que os contêineres do RAG e da newsletter continuam de pé (`docker ps`)
+- [x] 9.3 Na VPS: `git clone`, criar `.env`, `docker compose -f docker/docker-compose.yml --env-file .env up -d --build` (sem `--remove-orphans`); verificar `curl http://127.0.0.1:8002/health` saudável e que os contêineres do RAG e da newsletter continuam de pé (`docker ps`)
 - [x] 9.4 Escrever `infra/nginx/fraud-location.conf` (301 de `/projects/fraud` + proxy com prefixo removido, buffering off, timeout alto); verificar localmente com `nginx -t` (ou por revisão contra o bloco do RAG) que a sintaxe é válida
-- [ ] 9.5 Aplicar o bloco no Nginx do portfólio seguindo o `DEPLOY.md` dele (repositório `portfolio-website`, mesclando o snippet, `scp`, `nginx -t`, reload — **peça confirmação ao dono antes de alterar a config de produção**); verificar `https://matheusramos.dev/projects/fraud/`, o stream ao vivo e o `/score` de exemplo pelo domínio
-- [ ] 9.6 Verificar que as rotas vizinhas seguem intactas (`/`, `/projects/rag/`, `/api/newsletter/`) e que broker/banco/8002 não respondem pelo IP público; verificar o dashboard no navegador sob a CSP real (console sem violações)
+- [x] 9.5 Aplicar o bloco no Nginx do portfólio seguindo o `DEPLOY.md` dele (repositório `portfolio-website`, mesclando o snippet, `scp`, `nginx -t`, reload — **peça confirmação ao dono antes de alterar a config de produção**); verificar `https://matheusramos.dev/projects/fraud/`, o stream ao vivo e o `/score` de exemplo pelo domínio
+- [x] 9.6 Verificar que as rotas vizinhas seguem intactas (`/`, `/projects/rag/`, `/api/newsletter/`) e que broker/banco/8002 não respondem pelo IP público; verificar o dashboard no navegador sob a CSP real (console sem violações)
 - [ ] 9.7 Observar o stack por um período (memória, reinícios, crescimento de disco/retention) e registrar; verificar que não há reinícios por OOM e que os outros stacks seguem estáveis
 
 ## 10. Documentation and portfolio integration (spec: portfolio-documentation)
