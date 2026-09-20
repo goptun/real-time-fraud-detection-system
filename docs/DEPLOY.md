@@ -13,6 +13,7 @@ Host, chave SSH e o fluxo de Nginx/Cloudflare do site principal estão no `DEPLO
 - **Nunca** `docker compose down --remove-orphans` a partir de uma pasta `docker/` sem `-p fraud-detection` / sem o `name:` do arquivo: outros stacks da VPS também têm uma pasta `docker/`.
 - **Nunca** publicar broker/banco no host, nem a API em `0.0.0.0` (o Docker ignora o `ufw`).
 - **Sempre** `nginx -t` antes do `reload`: um erro derruba todos os sites da VPS.
+- **Cuidado ao reconstruir imagens nesta VPS:** o `build` do fraud atualizou o tag `python:3.12-slim`, o que invalidou o cache de build do RAG (reconstruí-lo hoje reinstalaria `torch`, ~90 min de CPU nos 2 núcleos). Não rode `docker compose build` do RAG sem antes conferir `CACHED` no início do log; e nunca *recrie* o `rag_api` sem antes persistir o cache de modelos (ver a nota operacional no README do RAG).
 - Não commitar o `.env`. Use senha **URL-safe** em `POSTGRES_PASSWORD` (ela entra numa URL): `openssl rand -hex 16`.
 
 ## 1. Gate de recursos (somente leitura — faça ANTES de subir)
