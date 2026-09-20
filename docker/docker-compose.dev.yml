@@ -1,0 +1,10 @@
+# Override SÓ para desenvolvimento local: publica broker e banco em 127.0.0.1 para
+# rodar Python fora do Docker. Não usar na VPS (lá só a API é publicada).
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up -d kafka postgres kafka-init
+services:
+  kafka:
+    ports:
+      - "127.0.0.1:29092:29092"
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"

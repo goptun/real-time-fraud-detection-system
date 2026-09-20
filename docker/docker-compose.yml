@@ -1,0 +1,178 @@
+# Stack do Real-Time Fraud Detection System.
+#
+# `name` explícito: sem isso o Compose deriva o nome do projeto da pasta ("docker"),
+# igual ao de outros stacks desta VPS compartilhada (rag-knowledge-assistant/docker/),
+# e um `down --remove-orphans` aqui apagaria os contêineres do vizinho.
+# NUNCA remova este campo.
+name: fraud-detection
+
+# Variáveis comuns aos serviços Python. O DATABASE_URL usa o host interno "postgres": use uma
+# senha URL-safe (letras e números) em POSTGRES_PASSWORD.
+x-app-env: &app-env
+  DATABASE_URL: postgresql://${POSTGRES_USER:-fraud}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fraud}
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
+x-app-build: &app-build
+  context: ..
+  dockerfile: docker/Dockerfile
+
+services:
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: fraud_kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://127.0.0.1:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      # Heap limitado: broker único numa VPS compartilhada (ver design.md, Decisão 5/10).
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx384m"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    mem_limit: 768m
+    # VPS compartilhada de 2 núcleos: peso baixo (os vizinhos ganham sob contenção) e teto p/ o pico do aquecimento.
+    cpu_shares: 256
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  # Job único: cria os tópicos (o broker não cria automaticamente).
+  # Retenção curta E segmentos pequenos: o Kafka só apaga segmentos fechados; com o
+  # segment.bytes padrão (1 GB) nada seria removido e o disco cresceria sem limite.
+  kafka-init:
+    image: apache/kafka:3.9.0
+    container_name: fraud_kafka_init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        K=/opt/kafka/bin/kafka-topics.sh
+        $$K --bootstrap-server kafka:9092 --create --if-not-exists --topic transactions \
+          --partitions 3 --replication-factor 1 \
+          --config retention.ms=3600000 --config retention.bytes=134217728 \
+          --config segment.ms=600000 --config segment.bytes=33554432
+        $$K --bootstrap-server kafka:9092 --create --if-not-exists --topic transactions.rejected \
+          --partitions 1 --replication-factor 1 \
+          --config retention.ms=86400000 --config retention.bytes=33554432 \
+          --config segment.ms=3600000 --config segment.bytes=8388608
+        $$K --bootstrap-server kafka:9092 --list
+    mem_limit: 256m
+    restart: "no"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: fraud_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fraud}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: ${POSTGRES_DB:-fraud}
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=30", "-c", "work_mem=4MB"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    mem_limit: 256m
+    cpu_shares: 256
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-fraud} -d $${POSTGRES_DB:-fraud}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # Consumidor Kafka -> features -> modelo -> PostgreSQL (crash-only: se cair, reinicia e retoma do último offset).
+  scorer:
+    build: *app-build
+    image: fraud-detection-app:local
+    container_name: fraud_scorer
+    command: ["python", "scripts/run_scorer.py"]
+    environment: *app-env
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    mem_limit: 384m
+    cpu_shares: 256
+    cpus: 0.8
+    init: true
+    stop_grace_period: 20s
+    restart: unless-stopped
+
+  # Replay de transações sintéticas (relógio de simulação acelerado; ver design.md, Decisão 12).
+  producer:
+    build: *app-build
+    image: fraud-detection-app:local
+    container_name: fraud_producer
+    command: ["python", "scripts/run_producer.py"]
+    environment:
+      <<: *app-env
+      REPLAY_RATE_PER_SEC: ${REPLAY_RATE_PER_SEC:-2}
+      REPLAY_USERS: ${REPLAY_USERS:-500}
+      REPLAY_WARMUP_DAYS: ${REPLAY_WARMUP_DAYS:-35}
+      REPLAY_WARMUP_RATE_PER_SEC: ${REPLAY_WARMUP_RATE_PER_SEC:-120}
+      REPLAY_FRAUD_RATE: ${REPLAY_FRAUD_RATE:-0.03}
+      REPLAY_DRIFT_FEATURE: ${REPLAY_DRIFT_FEATURE:-}
+      REPLAY_DRIFT_FACTOR: ${REPLAY_DRIFT_FACTOR:-1.0}
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      scorer:
+        condition: service_started
+    mem_limit: 256m
+    cpu_shares: 256
+    cpus: 0.5
+    init: true
+    stop_grace_period: 15s
+    restart: unless-stopped
+
+  # API + dashboard estático. ÚNICO serviço publicado, e só em loopback: o Nginx da VPS faz o proxy
+  # (Docker ignora o ufw; publicar em 0.0.0.0 exporia a porta à internet).
+  api:
+    build: *app-build
+    image: fraud-detection-app:local
+    container_name: fraud_api
+    environment:
+      <<: *app-env
+      SCORE_RATE_LIMIT_PER_MINUTE: ${SCORE_RATE_LIMIT_PER_MINUTE:-10}
+      SCORE_GLOBAL_RATE_LIMIT_PER_MINUTE: ${SCORE_GLOBAL_RATE_LIMIT_PER_MINUTE:-120}
+    ports:
+      - "127.0.0.1:8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      scorer:
+        condition: service_started
+    mem_limit: 320m
+    cpu_shares: 512
+    cpus: 0.5
+    init: true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8002/health', timeout=4).status == 200 else 1)"]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  kafka_data:
+  postgres_data:

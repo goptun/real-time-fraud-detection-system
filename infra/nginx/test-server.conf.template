@@ -1,0 +1,18 @@
+# SÓ PARA TESTE LOCAL: reproduz o server block de produção do portfólio (mesmos headers e
+# mesma CSP) em HTTP puro na porta 8080 e inclui o snippet fraud-location.conf, para
+# validar o dashboard e o SSE sob as MESMAS restrições do domínio real.
+# Uso: infra/nginx/run-local-nginx.sh
+server {
+    listen 8080;
+    server_name localhost;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://static.cloudflareinsights.com https://cloudflareinsights.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+
+    # O site principal não existe aqui: qualquer outra rota responde 404.
+    location / { return 404; }
+
+    include /etc/nginx/snippets/fraud-location.conf;
+}

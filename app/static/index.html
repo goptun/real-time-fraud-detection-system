@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Real-Time Fraud Detection — Demo</title>
+<meta name="description" content="Pipeline de detecção de fraude em tempo real (Kafka, XGBoost, FastAPI, PostgreSQL) com dados sintéticos: feed ao vivo, métricas do modelo e monitoramento de drift.">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css?v=3">
+<script src="theme.js?v=1"></script>
+</head>
+<body>
+<header class="nav-wrap">
+  <nav class="nav" aria-label="Navegação principal">
+    <!-- Links para o site principal (mesmo domínio): por isso raiz-absolutos, ao contrário dos assets e da API deste painel. -->
+    <a class="brand" href="/">Matheus Ramos</a>
+    <ul class="nav-links">
+      <li><a href="/">Início</a></li>
+      <li><a href="/projects/" aria-current="page">Projetos</a></li>
+      <li><a href="/newsletter/">Newsletter</a></li>
+    </ul>
+    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Alternar tema claro/escuro">
+      <svg class="icon icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path></svg>
+      <svg class="icon icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"></path></svg>
+    </button>
+  </nav>
+</header>
+
+<main class="wrap" id="dashboard">
+  <section class="intro" aria-labelledby="title">
+    <h1 id="title">Real-Time Fraud Detection</h1>
+    <p class="subtitle">
+      Pipeline de detecção de fraude em tempo real: transações entram por um tópico <b>Kafka</b>, um serviço
+      calcula features por usuário, um modelo <b>XGBoost</b> dá o score de risco e tudo é gravado no
+      <b>PostgreSQL</b> — este painel lê o resultado ao vivo.
+    </p>
+    <div class="badge-row">
+      <span class="badge">Kafka</span><span class="badge">XGBoost</span><span class="badge">FastAPI</span>
+      <span class="badge">PostgreSQL</span><span class="badge">SSE</span><span class="badge">PSI (drift)</span>
+    </div>
+    <p class="notice" role="note">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4M12 8h.01"></path></svg>
+      <span><b>Dados 100% sintéticos.</b> O feed vem de um simulador com o <em>relógio acelerado</em>: os horários dos eventos
+      são simulados; latência, janelas e alertas usam o relógio real. Não use este modelo com dados financeiros reais.</span>
+    </p>
+    <div class="status-line">
+      <span class="pill" id="conn" data-state="connecting"><span class="pill-icon" aria-hidden="true"></span><span id="conn-text">Conectando…</span></span>
+      <span class="muted small" id="model-line"></span>
+    </div>
+  </section>
+
+  <div id="live-area">
+  <!-- ============================================================ KPIs -->
+  <section aria-labelledby="kpi-h">
+    <h2 id="kpi-h">Agora</h2>
+    <div class="kpis">
+      <div class="tile"><div class="tile-label">Transações por minuto</div><div class="tile-value" id="kpi-tpm">—</div><div class="tile-sub" id="kpi-tpm-sub">&nbsp;</div></div>
+      <div class="tile"><div class="tile-label">Taxa de alertas</div><div class="tile-value" id="kpi-flag">—</div><div class="tile-sub" id="kpi-flag-sub">&nbsp;</div></div>
+      <div class="tile"><div class="tile-label">Latência de scoring (p95)</div><div class="tile-value" id="kpi-lat">—</div><div class="tile-sub" id="kpi-lat-sub">&nbsp;</div></div>
+      <div class="tile"><div class="tile-label">Recall ao vivo</div><div class="tile-value" id="kpi-recall">—</div><div class="tile-sub" id="kpi-recall-sub">&nbsp;</div></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ FEED -->
+  <section class="card" aria-labelledby="feed-h">
+    <div class="card-head">
+      <div>
+        <h2 id="feed-h">Transações ao vivo</h2>
+        <p class="muted small">Mais recentes primeiro. “Rótulo” é a verdade-terreno do simulador — em produção real ele só chegaria dias depois.</p>
+      </div>
+      <label class="check"><input type="checkbox" id="flagged-only"> <span>Só sinalizadas</span></label>
+    </div>
+    <div class="table-wrap">
+      <table class="tbl feed" id="feed-table">
+        <caption class="sr-only">Últimas transações pontuadas</caption>
+        <thead><tr>
+          <th scope="col">Hora</th><th scope="col" class="c-user">Usuário</th><th scope="col" class="c-cat">Categoria</th>
+          <th scope="col" class="c-city">Cidade</th><th scope="col" class="num">Valor</th>
+          <th scope="col">Score</th><th scope="col">Decisão</th><th scope="col" class="c-label">Rótulo</th>
+        </tr></thead>
+        <tbody id="feed-body"><tr><td colspan="8" class="empty">Aguardando transações…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============================================================ OPERAÇÃO -->
+  <section aria-labelledby="ops-h">
+    <h2 id="ops-h">Operação <span class="h-sub">últimos 15 min</span></h2>
+    <div class="grid-2">
+      <div class="card">
+        <h3>Transações por minuto</h3>
+        <div class="legend" id="legend-timeline"></div>
+        <div class="chart" id="chart-timeline" role="img" aria-label="Transações pontuadas por minuto, aprovadas e sinalizadas"></div>
+        <details class="twin"><summary>Ver como tabela</summary><div class="table-wrap"><table class="tbl" id="tbl-timeline"></table></div></details>
+      </div>
+      <div class="card">
+        <h3>Distribuição dos scores <span class="h-sub">escala logarítmica</span></h3>
+        <div class="chart" id="chart-hist" role="img" aria-label="Histograma dos scores de risco"></div>
+        <p class="muted small" id="hist-note"></p>
+        <details class="twin"><summary>Ver como tabela</summary><div class="table-wrap"><table class="tbl" id="tbl-hist"></table></div></details>
+      </div>
+    </div>
+  </section>
+  </div>
+
+  <!-- ============================================================ MODELO -->
+  <section aria-labelledby="model-h">
+    <h2 id="model-h">Qualidade do modelo</h2>
+    <div class="grid-2">
+      <div class="card">
+        <h3>Avaliação offline <span class="h-sub">conjunto de teste, split temporal</span></h3>
+        <dl class="metrics" id="model-metrics"></dl>
+        <p class="muted small" id="model-criterion"></p>
+        <h3 class="mt">PR-AUC por modelo <span class="h-sub">o servido em destaque</span></h3>
+        <div class="chart" id="chart-models" role="img" aria-label="PR-AUC no conjunto de teste por modelo"></div>
+        <div class="table-wrap"><table class="tbl" id="tbl-models"></table></div>
+      </div>
+      <div class="card" id="live-quality-card">
+        <h3>Ao vivo, contra o rótulo do simulador <span class="h-sub">últimos 15 min</span></h3>
+        <p class="muted small">Como o feed é sintético, sabemos a resposta certa: dá para medir o modelo em “produção” — o mesmo que o monitoramento real faria quando os rótulos chegassem.</p>
+        <table class="tbl confusion" id="tbl-confusion"></table>
+        <p class="muted small" id="confusion-note"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ DRIFT -->
+  <section class="card" aria-labelledby="drift-h" id="drift-card">
+    <div class="card-head">
+      <div>
+        <h2 id="drift-h">Monitoramento de drift <span class="h-sub">últimos 60 min</span></h2>
+        <p class="muted small">PSI (Population Stability Index) de cada feature contra a distribuição do treino. Acima de 0,2 = deslocamento relevante. A janela cobre vários “dias” simulados para a sazonalidade por hora não virar alarme falso.</p>
+      </div>
+      <span class="pill" id="drift-pill" data-state="wait"><span class="pill-icon" aria-hidden="true"></span><span id="drift-pill-text">Coletando dados…</span></span>
+    </div>
+    <div class="chart" id="chart-drift" role="img" aria-label="PSI por feature"></div>
+    <details class="twin"><summary>Ver todas as features como tabela</summary><div class="table-wrap"><table class="tbl" id="tbl-drift"></table></div></details>
+  </section>
+
+  <!-- ============================================================ TRY IT -->
+  <section class="card" aria-labelledby="try-h" id="try">
+    <h2 id="try-h">Experimente</h2>
+    <p class="muted small">Monte uma transação e veja o score. Simula um usuário com histórico em <b>São Paulo</b>, gasto típico de <b>R$ 70</b> e maior compra recente de <b>R$ 300</b>. Nada disso é gravado no pipeline.</p>
+    <div class="chips" id="presets" role="group" aria-label="Exemplos prontos">
+      <button type="button" class="chip" data-preset="normal">Compra normal</button>
+      <button type="button" class="chip" data-preset="suspicious">Compra suspeita</button>
+    </div>
+    <form id="score-form" class="form" novalidate>
+      <label>Valor (R$)<input id="f-amount" type="number" min="1" max="1000000" step="0.01" required inputmode="decimal"></label>
+      <label>Cidade<select id="f-city"></select></label>
+      <label>Categoria do merchant<select id="f-category"></select></label>
+      <label>Transações no último minuto<input id="f-n1" type="number" min="0" max="50" step="1" inputmode="numeric"></label>
+      <label>Transações nos últimos 10 min<input id="f-n10" type="number" min="0" max="200" step="1" inputmode="numeric"></label>
+      <label>Segundos desde a última transação<input id="f-sec" type="number" min="0" max="604800" step="1" inputmode="numeric"></label>
+      <label>Distância da última transação (km)<input id="f-km" type="number" min="0" max="20000" step="1" inputmode="numeric"></label>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="f-newdev"> <span>Dispositivo nunca visto</span></label>
+        <label class="check"><input type="checkbox" id="f-newmerch"> <span>Merchant novo para o usuário</span></label>
+      </div>
+      <div class="form-actions"><button type="submit" id="f-submit">Calcular score</button></div>
+    </form>
+    <div id="try-status" class="status" role="status" aria-live="polite"></div>
+    <div id="try-result" class="result" hidden>
+      <div class="result-head">
+        <div class="result-score"><span class="result-num" id="r-score">—</span><span class="muted small">score de risco (0–1)</span></div>
+        <span class="pill" id="r-decision" data-state="ok"><span class="pill-icon" aria-hidden="true"></span><span id="r-decision-text"></span></span>
+      </div>
+      <div class="meter" id="r-meter" aria-hidden="true"><div class="meter-fill" id="r-fill"></div><div class="meter-tick" id="r-tick"></div></div>
+      <p class="muted small" id="r-threshold"></p>
+      <h3>O que mais pesou nesta decisão</h3>
+      <div class="chart" id="chart-contrib" role="img" aria-label="Contribuição das principais features para o score"></div>
+      <details class="twin"><summary>Ver todas as features enviadas ao modelo</summary><div class="table-wrap"><table class="tbl" id="tbl-features"></table></div></details>
+    </div>
+  </section>
+
+  <footer>
+    <p>Projeto de portfólio — código, arquitetura, avaliação e trade-offs no
+      <a href="https://github.com/goptun/real-time-fraud-detection-system" target="_blank" rel="noopener">GitHub</a>.
+      <a href="/projects/">← Voltar aos projetos</a></p>
+    <p class="muted small">Dados sintéticos · relógio de simulação acelerado · limite de requisições no cálculo de score por visitante.</p>
+  </footer>
+</main>
+
+<div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+<script src="charts.js?v=2" defer></script>
+<script src="app.js?v=3" defer></script>
+</body>
+</html>

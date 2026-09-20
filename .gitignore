@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.egg-info/
+.pytest_cache/
+.DS_Store
+*.log
+
+# Dados gerados (reproduzíveis via scripts/generate_data.py, não versionados)
+/data/
+!/data/.gitkeep
+
+# Relatórios de treino intermediários (o artefato final fica em models/)
+reports/tmp/
+
+# Scaffolding local das ferramentas de IA (não faz parte do projeto)
+.claude/

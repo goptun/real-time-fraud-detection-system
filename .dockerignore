@@ -1,0 +1,16 @@
+.git
+.venv
+.claude
+.env
+.env.*
+!.env.example
+openspec
+tests
+docs
+infra
+reports
+data
+__pycache__
+*.pyc
+*.log
+.DS_Store
