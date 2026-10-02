@@ -16,8 +16,13 @@
   document.addEventListener('DOMContentLoaded', function () {
     var button = document.getElementById('theme-toggle');
     if (!button) return;
+    var transitionTimer;
     button.addEventListener('click', function () {
       var next = current() === 'dark' ? 'light' : 'dark';
+      // Cross-fade curto das cores (ver .theme-transition em style.css).
+      root.classList.add('theme-transition');
+      clearTimeout(transitionTimer);
+      transitionTimer = setTimeout(function () { root.classList.remove('theme-transition'); }, 200);
       root.setAttribute('data-theme', next);
       try { localStorage.setItem('theme', next); } catch (e) {}
       document.dispatchEvent(new CustomEvent('themechange'));
