@@ -95,6 +95,11 @@ a:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 .nav { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-4); max-width: 84rem; margin-inline: auto; padding: var(--space-3) var(--space-4); }
 .brand { font-weight: 700; letter-spacing: var(--tracking-tight); text-decoration: none; color: var(--text); }
 .brand:hover { text-decoration: none; }
+/* Monograma "MR" — o mesmo do favicon do site principal, com os tokens do tema. */
+.brand { display: inline-flex; align-items: center; gap: var(--space-2); }
+.brand-mark { width: 1.75rem; height: 1.75rem; flex-shrink: 0; }
+.brand-mark-tile { fill: var(--accent-bg); stroke: var(--border); }
+.brand-mark-glyph { fill: none; stroke: var(--accent); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
 .nav-links { display: flex; flex-wrap: wrap; gap: var(--space-5); list-style: none; margin: 0; padding: 0; }
 .nav-links a { text-decoration: none; color: var(--text-2); font-size: var(--text-sm); }
 .nav-links a:hover { text-decoration: underline; text-underline-offset: 0.35rem; text-decoration-thickness: 2px; }
