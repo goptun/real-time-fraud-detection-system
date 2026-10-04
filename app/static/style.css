@@ -143,6 +143,7 @@ h3.mt { margin-top: var(--space-4); }
 .card-head p { margin: 0; max-width: 46rem; }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: var(--space-4); }
 .grid-2 > .card { margin-bottom: 0; }
+#drift-card { margin-top: var(--space-4); }
 .table-wrap { overflow-x: auto; }
 #live-area, #dashboard { transition: opacity 0.3s var(--ease-out); }
 .stale { opacity: 0.55; }
